@@ -11,7 +11,7 @@ Rackoon is a small self-hosted web dashboard for the machines on your LAN:
 - **Script library** with 24 premade scripts (updates, services, Docker, disk cleanup, SMART, network, security) that you can copy into your scripts with one click.
 - Ad-hoc commands without saving a script, plus a Stop button for running scripts.
 - Filter servers by name, IP or tag, and use Wake-on-LAN for servers with a MAC address.
-- Themes: System, Light, Dark, Nord, Dracula, Gruvbox and Solarized. The choice is saved per browser.
+- Themes: System, Light and Dark use the Rackoon ash-and-amber palette; Nord, Dracula, Gruvbox and Solarized are also available. The choice is saved per browser.
 - Every run is saved to History with its output and exit code.
 - The UI is protected by a password, which you set on first launch.
 
@@ -104,3 +104,14 @@ Then open `https://<ip>:8080`. The browser will warn about the self-signed certi
 - Wake-on-LAN sends a UDP broadcast, so under Docker it needs `network_mode: host`.
 - Stop sends SIGTERM (OpenSSH 8.1+ on the server) and closes the SSH session.
 - Stats use `/proc`, so they work on Linux targets only. Scripts work on anything with bash.
+
+## AI usage disclosure
+
+This project was built with help from AI coding assistants, mainly
+[Claude Code](https://claude.com/claude-code) (Anthropic).
+
+- **Code:** [FILL IN: how much of the code was AI-written vs. written by you]
+- **Repo prep:** The license, commit history cleanup, GitHub publishing steps and the UI theme were done with Claude Code.
+- **Review:** I reviewed every change and tested the app on my own LAN. Bugs are still possible, especially in the SSH and credential handling, so read the code before you trust it with real servers.
+
+Commits made with AI help have a `Co-Authored-By: Claude` line.
