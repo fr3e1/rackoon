@@ -1,3 +1,7 @@
+# VIBECODED SLOP, DO NOT USE
+# WILL ONLY BE USED FOR A CTF
+# SERIOUSLY DO NOT USE THIS SLOP
+
 # 🦝 Rackoon
 
 *A tiny raccoon that tends your server rack.*
