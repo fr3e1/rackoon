@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Server Manager</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- Login / first-run setup -->
+<section id="login-view" class="center" hidden>
+  <form id="login-form" class="card narrow">
+    <h1>Server Manager</h1>
+    <p id="login-hint" class="muted"></p>
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+    <input type="password" id="login-confirm" placeholder="Confirm password" autocomplete="new-password" hidden>
+    <button type="submit" id="login-btn">Log in</button>
+    <p id="login-error" class="error"></p>
+  </form>
+</section>
+
+<!-- App -->
+<div id="app-view" hidden>
+  <header>
+    <span class="brand">Server Manager</span>
+    <nav>
+      <button data-tab="servers" class="active">Servers</button>
+      <button data-tab="scripts">Scripts</button>
+      <button data-tab="run">Run</button>
+      <button data-tab="history">History</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Servers -->
+    <section id="tab-servers" class="tab">
+      <div class="toolbar">
+        <h2>Servers</h2>
+        <span class="spacer"></span>
+        <button class="ghost" id="refresh-status">Check status</button>
+        <button id="add-server">+ Add server</button>
+      </div>
+      <div id="server-list" class="grid"></div>
+    </section>
+
+    <!-- Scripts -->
+    <section id="tab-scripts" class="tab" hidden>
+      <div class="toolbar">
+        <h2>Scripts</h2>
+        <span class="spacer"></span>
+        <button id="add-script">+ New script</button>
+      </div>
+      <div id="script-list" class="list"></div>
+    </section>
+
+    <!-- Run -->
+    <section id="tab-run" class="tab" hidden>
+      <div class="toolbar"><h2>Run a script</h2></div>
+      <div class="card">
+        <label>Script <select id="run-script"></select></label>
+        <label>Arguments <span class="muted">(optional, available as $1, $2…)</span>
+          <input id="run-args" placeholder="e.g. nginx --force">
+        </label>
+        <div class="field-label">Servers <button class="link" id="run-select-all" type="button">select all</button></div>
+        <div id="run-servers" class="checks"></div>
+        <button id="run-btn">Run</button>
+      </div>
+      <div id="run-output"></div>
+    </section>
+
+    <!-- History -->
+    <section id="tab-history" class="tab" hidden>
+      <div class="toolbar">
+        <h2>History</h2>
+        <span class="spacer"></span>
+        <button class="ghost danger" id="clear-history">Clear history</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>When</th><th>Script</th><th>Server</th><th>Duration</th><th>Result</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tab" hidden>
+      <div class="toolbar"><h2>Settings</h2></div>
+      <form id="settings-form" class="card">
+        <h3>General</h3>
+        <label>Status check interval (seconds) <input type="number" min="5" name="status_interval"></label>
+        <label>SSH connect timeout (seconds) <input type="number" min="1" name="ssh_timeout"></label>
+        <button type="submit">Save</button>
+      </form>
+      <div class="card">
+        <h3>Move to another machine</h3>
+        <p class="muted">The export holds all servers (credentials included), scripts and settings. It doesn't include the login password. Keep the file safe.</p>
+        <div class="row">
+          <a class="button" href="/api/config/export">Export config</a>
+          <label class="button ghost">Import (replace)<input type="file" accept=".json" id="import-replace" hidden></label>
+          <label class="button ghost">Import (merge)<input type="file" accept=".json" id="import-merge" hidden></label>
+        </div>
+      </div>
+      <form id="password-form" class="card">
+        <h3>Change password</h3>
+        <input type="password" name="current" placeholder="Current password" required>
+        <input type="password" name="new" placeholder="New password" required>
+        <button type="submit">Change password</button>
+      </form>
+      <div class="card"><button class="ghost danger" id="logout">Log out</button></div>
+    </section>
+  </main>
+</div>
+
+<!-- Server dialog -->
+<dialog id="server-dialog">
+  <form id="server-form" method="dialog">
+    <h3 id="server-dialog-title">Add server</h3>
+    <label>Name <input name="name" required placeholder="nas"></label>
+    <div class="row">
+      <label class="grow">Host / IP <input name="host" required placeholder="192.168.1.10"></label>
+      <label class="port">Port <input name="port" type="number" value="22"></label>
+    </div>
+    <label>Username <input name="username" placeholder="root"></label>
+    <label>Authentication
+      <select name="auth">
+        <option value="default">SSH agent / ~/.ssh keys of this machine</option>
+        <option value="password">Password</option>
+        <option value="key_data">Paste private key</option>
+        <option value="key_path">Private key file on this machine</option>
+      </select>
+    </label>
+    <label data-auth="password">Password <input type="password" name="password" autocomplete="new-password"></label>
+    <label data-auth="key_data">Private key <textarea name="key_data" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>
+    <label data-auth="key_path">Key file path <input name="key_path" placeholder="/home/me/.ssh/id_ed25519"></label>
+    <label data-auth="key_data key_path">Key passphrase <span class="muted">(if any)</span> <input type="password" name="key_passphrase" autocomplete="new-password"></label>
+    <label>Tags <span class="muted">(comma separated)</span> <input name="tags" placeholder="home, docker"></label>
+    <p class="error" id="server-error"></p>
+    <div class="row end">
+      <button type="button" class="ghost" data-close>Cancel</button>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Script dialog -->
+<dialog id="script-dialog" class="wide">
+  <form id="script-form" method="dialog">
+    <h3 id="script-dialog-title">New script</h3>
+    <label>Name <input name="name" required placeholder="Update packages"></label>
+    <label>Description <input name="description" placeholder="Optional"></label>
+    <label>Script <span class="muted">(runs with bash on the target server)</span>
+      <textarea name="body" rows="16" class="code" spellcheck="false" required placeholder="#!/bin/bash&#10;set -e&#10;sudo apt update && sudo apt -y upgrade"></textarea>
+    </label>
+    <p class="error" id="script-error"></p>
+    <div class="row end">
+      <button type="button" class="ghost" data-close>Cancel</button>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- History output dialog -->
+<dialog id="output-dialog" class="wide">
+  <h3 id="output-title"></h3>
+  <pre id="output-body" class="terminal"></pre>
+  <div class="row end"><button type="button" data-close>Close</button></div>
+</dialog>
+
+<!-- Confirm dialog -->
+<dialog id="confirm-dialog">
+  <p id="confirm-text"></p>
+  <div class="row end">
+    <button type="button" class="ghost" data-answer="no">Cancel</button>
+    <button type="button" class="danger" data-answer="yes">Confirm</button>
+  </div>
+</dialog>
+
+<div id="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

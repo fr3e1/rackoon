@@ -1,0 +1,15 @@
+# Copy to /etc/systemd/system/, adjust User and paths, then:
+#   sudo systemctl enable --now server-manager
+[Unit]
+Description=Server Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=YOUR_USER
+WorkingDirectory=/opt/server-manager
+ExecStart=/opt/server-manager/run.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

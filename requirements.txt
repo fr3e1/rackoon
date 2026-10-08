@@ -1,0 +1,4 @@
+fastapi==0.142.4
+uvicorn[standard]==0.54.0
+asyncssh==2.24.1
+python-multipart==0.0.32
