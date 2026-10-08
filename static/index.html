@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Server Manager</title>
+  <title>Rackoon</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦝</text></svg>">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { const t = localStorage.getItem("rackoon-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,7 +16,8 @@
 <!-- Login / first-run setup -->
 <section id="login-view" class="center" hidden>
   <form id="login-form" class="card narrow">
-    <h1>Server Manager</h1>
+    <h1><span class="logo">🦝</span> Rackoon</h1>
+    <p class="muted tagline">A tiny raccoon that tends your server rack.</p>
     <p id="login-hint" class="muted"></p>
     <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
     <input type="password" id="login-confirm" placeholder="Confirm password" autocomplete="new-password" hidden>
@@ -23,7 +29,7 @@
 <!-- App -->
 <div id="app-view" hidden>
   <header>
-    <span class="brand">Server Manager</span>
+    <span class="brand"><span class="logo">🦝</span> Rackoon</span>
     <nav>
       <button data-tab="servers" class="active">Servers</button>
       <button data-tab="scripts">Scripts</button>
@@ -31,6 +37,15 @@
       <button data-tab="history">History</button>
       <button data-tab="settings">Settings</button>
     </nav>
+    <select id="theme-picker" class="theme-picker" title="Theme">
+      <option value="">System theme</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+      <option value="nord">Nord</option>
+      <option value="dracula">Dracula</option>
+      <option value="gruvbox">Gruvbox</option>
+      <option value="solarized">Solarized</option>
+    </select>
   </header>
 
   <main>
@@ -38,8 +53,10 @@
     <section id="tab-servers" class="tab">
       <div class="toolbar">
         <h2>Servers</h2>
+        <input id="server-filter" type="search" placeholder="Filter by name, IP or tag">
         <span class="spacer"></span>
         <button class="ghost" id="refresh-status">Check status</button>
+        <button class="ghost" id="all-stats">Load all stats</button>
         <button id="add-server">+ Add server</button>
       </div>
       <div id="server-list" class="grid"></div>
@@ -50,6 +67,7 @@
       <div class="toolbar">
         <h2>Scripts</h2>
         <span class="spacer"></span>
+        <button class="ghost" id="open-library">Add from library</button>
         <button id="add-script">+ New script</button>
       </div>
       <div id="script-list" class="list"></div>
@@ -60,12 +78,19 @@
       <div class="toolbar"><h2>Run a script</h2></div>
       <div class="card">
         <label>Script <select id="run-script"></select></label>
+        <label id="run-command-wrap" hidden>Command <span class="muted">(runs with bash, nothing is saved except history)</span>
+          <textarea id="run-command" rows="4" spellcheck="false" placeholder="df -h && uptime"></textarea>
+        </label>
         <label>Arguments <span class="muted">(optional, available as $1, $2…)</span>
           <input id="run-args" placeholder="e.g. nginx --force">
         </label>
         <div class="field-label">Servers <button class="link" id="run-select-all" type="button">select all</button></div>
         <div id="run-servers" class="checks"></div>
-        <button id="run-btn">Run</button>
+        <div id="run-sudo" class="sudo-prompts" hidden></div>
+        <div class="row">
+          <button id="run-btn">Run</button>
+          <button id="stop-btn" class="ghost danger" hidden>Stop</button>
+        </div>
       </div>
       <div id="run-output"></div>
     </section>
@@ -136,7 +161,18 @@
     <label data-auth="key_data">Private key <textarea name="key_data" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>
     <label data-auth="key_path">Key file path <input name="key_path" placeholder="/home/me/.ssh/id_ed25519"></label>
     <label data-auth="key_data key_path">Key passphrase <span class="muted">(if any)</span> <input type="password" name="key_passphrase" autocomplete="new-password"></label>
+    <label>Sudo password
+      <select name="sudo_mode">
+        <option value="none">Not needed (root, NOPASSWD, or no sudo)</option>
+        <option value="ssh">Same as the SSH password</option>
+        <option value="stored">Save a sudo password</option>
+        <option value="ask">Ask every time a script runs (not stored)</option>
+      </select>
+    </label>
+    <label data-sudo="stored">Sudo password to save <input type="password" name="sudo_password" autocomplete="new-password"></label>
+    <p class="muted hint" data-sudo="ssh">Only works when Authentication is set to Password.</p>
     <label>Tags <span class="muted">(comma separated)</span> <input name="tags" placeholder="home, docker"></label>
+    <label>MAC address <span class="muted">(optional, enables Wake-on-LAN)</span> <input name="mac" placeholder="aa:bb:cc:dd:ee:ff"></label>
     <p class="error" id="server-error"></p>
     <div class="row end">
       <button type="button" class="ghost" data-close>Cancel</button>
@@ -160,6 +196,25 @@
       <button type="submit">Save</button>
     </div>
   </form>
+</dialog>
+
+<!-- Machine details dialog -->
+<dialog id="details-dialog" class="wide">
+  <div class="toolbar">
+    <h3 id="details-title"></h3>
+    <span class="spacer"></span>
+    <button type="button" class="small ghost" id="details-refresh">Refresh</button>
+  </div>
+  <div id="details-body" class="details-grid"></div>
+  <div class="row end"><button type="button" data-close>Close</button></div>
+</dialog>
+
+<!-- Script library dialog -->
+<dialog id="library-dialog" class="wide">
+  <h3>Script library</h3>
+  <p class="muted">Adding a script copies it into your scripts, where you can edit it.</p>
+  <div id="library-body" class="library"></div>
+  <div class="row end"><button type="button" data-close>Close</button></div>
 </dialog>
 
 <!-- History output dialog -->

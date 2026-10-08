@@ -6,7 +6,7 @@ import hmac
 import secrets
 import time
 
-COOKIE_NAME = "sm_session"
+COOKIE_NAME = "rackoon_session"
 SESSION_TTL = 7 * 24 * 3600
 
 

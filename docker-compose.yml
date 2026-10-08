@@ -1,8 +1,11 @@
 services:
-  server-manager:
+  rackoon:
     build: .
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - rackoon-data:/data  # named volume, kept outside the project folder
     restart: unless-stopped
+
+volumes:
+  rackoon-data:

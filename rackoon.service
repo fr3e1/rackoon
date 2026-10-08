@@ -1,14 +1,14 @@
 # Copy to /etc/systemd/system/, adjust User and paths, then:
-#   sudo systemctl enable --now server-manager
+#   sudo systemctl enable --now rackoon
 [Unit]
-Description=Server Manager
+Description=Rackoon server manager
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=YOUR_USER
-WorkingDirectory=/opt/server-manager
-ExecStart=/opt/server-manager/run.sh
+WorkingDirectory=/opt/rackoon
+ExecStart=/opt/rackoon/run.sh
 Restart=on-failure
 
 [Install]

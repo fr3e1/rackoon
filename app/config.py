@@ -8,12 +8,19 @@ is enough.
 import json
 import os
 import secrets
+import shutil
 import threading
 import uuid
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("SM_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
+# User data lives outside the project folder so it can never be committed.
+# RACKOON_DATA_DIR overrides it (the Docker image uses /data).
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+_XDG_DATA = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+DATA_DIR = Path(os.environ.get("RACKOON_DATA_DIR") or _XDG_DATA / "rackoon").expanduser()
 CONFIG_PATH = DATA_DIR / "config.json"
+# Where older versions kept their data, newest first.
+LEGACY_DATA_DIRS = [_XDG_DATA / "server-manager", PROJECT_DIR / "data"]
 
 DEFAULT_SETTINGS = {
     "status_interval": 30,  # seconds between online checks
@@ -35,6 +42,23 @@ def _default() -> dict:
         "servers": [],
         "scripts": [],
     }
+
+
+def ensure_data_dir() -> None:
+    """Create the data dir (owner-only) and, on the first start with it, move
+    data over from a location an older version used."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(DATA_DIR, 0o700)
+    if CONFIG_PATH.exists():
+        return
+    for legacy in LEGACY_DATA_DIRS:
+        if not (legacy / "config.json").exists() or legacy.resolve() == DATA_DIR.resolve():
+            continue
+        for item in legacy.iterdir():
+            shutil.move(str(item), DATA_DIR / item.name)
+        legacy.rmdir()
+        print(f"Moved user data from {legacy} to {DATA_DIR}")
+        return
 
 
 def load() -> dict:

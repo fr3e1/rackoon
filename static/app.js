@@ -3,7 +3,8 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { servers: [], scripts: [], stats: {} };
+const state = { servers: [], scripts: [], stats: {}, filter: "" };
+const ADHOC = "__adhoc__";
 
 // --- helpers ------------------------------------------------------------------
 
@@ -68,6 +69,17 @@ const fmtUptime = (s) => {
 };
 const fmtTime = (ts) => new Date(ts * 1000).toLocaleString();
 
+// --- theme ----------------------------------------------------------------------
+
+const themePicker = $("#theme-picker");
+themePicker.value = document.documentElement.dataset.theme || "";
+themePicker.addEventListener("change", () => {
+  const theme = themePicker.value;
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  try { theme ? localStorage.setItem("rackoon-theme", theme) : localStorage.removeItem("rackoon-theme"); } catch {}
+});
+
 $$("dialog [data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 
 // --- auth ---------------------------------------------------------------------
@@ -87,7 +99,7 @@ function showLogin() {
   $("#login-confirm").hidden = !setupMode;
   $("#login-confirm").required = setupMode;
   $("#login-btn").textContent = setupMode ? "Set password" : "Log in";
-  $("#login-hint").textContent = setupMode ? "First run: choose a password for this dashboard." : "";
+  $("#login-hint").textContent = setupMode ? "First run: choose a password to guard the rack." : "";
   $("#login-password").focus();
 }
 
@@ -143,8 +155,21 @@ function renderServers() {
     list.append(el("p", { class: "muted" }, "No servers yet. Add one to get started."));
     return;
   }
-  for (const s of state.servers) list.append(serverCard(s));
+  const visible = state.servers.filter(matchesFilter);
+  for (const s of visible) list.append(serverCard(s));
+  if (!visible.length) list.append(el("p", { class: "muted" }, "No servers match the filter."));
 }
+
+function matchesFilter(s) {
+  const q = state.filter.trim().toLowerCase();
+  if (!q) return true;
+  return [s.name, s.host, s.username, ...(s.tags || [])].some((v) => v && v.toLowerCase().includes(q));
+}
+
+$("#server-filter").addEventListener("input", (e) => {
+  state.filter = e.target.value;
+  renderServers();
+});
 
 function serverCard(s) {
   const online = s.status?.online;
@@ -155,10 +180,15 @@ function serverCard(s) {
       el("span", { class: dotClass, title }),
       el("strong", {}, s.name)),
     el("div", { class: "muted" }, `${s.username ? s.username + "@" : ""}${s.host}:${s.port}`),
-    (s.tags || []).length ? el("div", { class: "tags" }, s.tags.map((t) => el("span", { class: "tag" }, t))) : null,
+    (s.tags || []).length ? el("div", { class: "tags" }, s.tags.map((t) => el("span", {
+      class: "tag clickable", title: "Filter by this tag",
+      onclick: () => { state.filter = $("#server-filter").value = t; renderServers(); },
+    }, t))) : null,
     statsView(s.id),
     el("div", { class: "actions" },
       el("button", { class: "small", onclick: () => loadStats(s.id) }, "Stats"),
+      el("button", { class: "small ghost", onclick: () => openDetails(s) }, "Details"),
+      s.mac ? el("button", { class: "small ghost", onclick: () => wake(s), title: `Send Wake-on-LAN to ${s.mac}` }, "Wake") : null,
       el("button", { class: "small ghost", onclick: () => { switchTab("run"); selectRunServer(s.id); } }, "Run script"),
       el("button", { class: "small ghost", onclick: () => openServerDialog(s) }, "Edit"),
       el("button", { class: "small ghost danger", onclick: () => deleteServer(s) }, "Delete")),
@@ -199,6 +229,38 @@ async function loadStats(id) {
   renderServers();
 }
 
+async function wake(s) {
+  try {
+    await api(`/api/servers/${s.id}/wake`, { method: "POST" });
+    toast(`Wake-on-LAN packet sent to ${s.name}`);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+let detailsServer = null;
+
+async function openDetails(s) {
+  detailsServer = s;
+  $("#details-title").textContent = `${s.name} (${s.host})`;
+  $("#details-dialog").showModal();
+  const body = $("#details-body");
+  body.replaceChildren(el("p", { class: "muted" }, "Collecting machine details…"));
+  try {
+    const sections = await api(`/api/servers/${s.id}/details`);
+    if (detailsServer !== s) return; // dialog was reopened for another server
+    body.replaceChildren(...sections.map((sec) =>
+      el("div", { class: "card" }, el("h3", {}, sec.title), el("pre", {}, sec.body))));
+  } catch (err) {
+    body.replaceChildren(el("p", { class: "error" }, err.message));
+  }
+}
+$("#details-refresh").addEventListener("click", () => detailsServer && openDetails(detailsServer));
+
+$("#all-stats").addEventListener("click", () => {
+  for (const s of state.servers.filter(matchesFilter)) if (s.status?.online !== false) loadStats(s.id);
+});
+
 function openServerDialog(server = null) {
   const form = $("#server-form");
   form.reset();
@@ -206,7 +268,9 @@ function openServerDialog(server = null) {
   $("#server-dialog-title").textContent = server ? `Edit ${server.name}` : "Add server";
   $("#server-error").textContent = "";
   if (server) {
-    for (const k of ["name", "host", "port", "username", "auth", "key_path"]) form.elements[k].value = server[k] ?? "";
+    for (const k of ["name", "host", "port", "username", "auth", "key_path", "mac"]) form.elements[k].value = server[k] ?? "";
+    form.elements.sudo_mode.value = server.sudo_mode || "none";
+    form.elements.sudo_password.placeholder = server.has_sudo_password ? "(unchanged)" : "";
     form.elements.tags.value = (server.tags || []).join(", ");
     form.elements.password.placeholder = server.has_password ? "(unchanged)" : "";
     form.elements.key_data.placeholder = server.has_key_data ? "(unchanged)" : "-----BEGIN OPENSSH PRIVATE KEY-----";
@@ -218,8 +282,11 @@ function openServerDialog(server = null) {
 function updateAuthFields() {
   const method = $("#server-form").elements.auth.value;
   $$("#server-form [data-auth]").forEach((l) => (l.hidden = !l.dataset.auth.split(" ").includes(method)));
+  const sudo = $("#server-form").elements.sudo_mode.value;
+  $$("#server-form [data-sudo]").forEach((l) => (l.hidden = l.dataset.sudo !== sudo || (sudo === "ssh" && method === "password")));
 }
 $("#server-form").elements.auth.addEventListener("change", updateAuthFields);
+$("#server-form").elements.sudo_mode.addEventListener("change", updateAuthFields);
 
 $("#server-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -324,13 +391,46 @@ async function deleteScript(s) {
 
 $("#add-script").addEventListener("click", () => openScriptDialog());
 
+let library = null;
+
+$("#open-library").addEventListener("click", async () => {
+  $("#library-dialog").showModal();
+  const body = $("#library-body");
+  try {
+    library ??= await api("/api/library");
+  } catch (err) {
+    body.replaceChildren(el("p", { class: "error" }, err.message));
+    return;
+  }
+  body.replaceChildren();
+  let category = null;
+  for (const item of library) {
+    if (item.category !== category) body.append(el("h4", {}, (category = item.category)));
+    const added = state.scripts.some((s) => s.name === item.name);
+    const btn = el("button", { class: "small" + (added ? " ghost" : "") }, added ? "Add again" : "Add");
+    btn.addEventListener("click", async () => {
+      const { name, description, body: scriptBody } = item;
+      await api("/api/scripts", { method: "POST", json: { name, description, body: scriptBody } });
+      await loadScripts();
+      btn.textContent = "Added ✓";
+      btn.className = "small ghost";
+    });
+    body.append(el("div", { class: "library-item" },
+      el("div", { class: "info" }, el("strong", {}, item.name), el("div", { class: "muted" }, item.description)),
+      btn));
+  }
+});
+
 // --- run ----------------------------------------------------------------------
 
 function renderRunForm() {
   const sel = $("#run-script");
   const current = sel.value;
-  sel.replaceChildren(...state.scripts.map((s) => el("option", { value: s.id }, s.name)));
+  sel.replaceChildren(
+    ...state.scripts.map((s) => el("option", { value: s.id }, s.name)),
+    el("option", { value: ADHOC }, "— Ad-hoc command —"));
   if (current) sel.value = current;
+  updateRunMode();
 
   const box = $("#run-servers");
   const checked = new Set($$("input:checked", box).map((i) => i.value));
@@ -340,23 +440,52 @@ function renderRunForm() {
       el("span", { class: s.status ? (s.status.online ? "dot on" : "dot off") : "dot" }),
       s.name)));
   if (!state.servers.length) box.append(el("span", { class: "muted" }, "Add a server first."));
+  renderSudoPrompts();
 }
+
+// One password field per selected server whose sudo mode is "ask". The
+// values are only sent with the run and cleared afterwards.
+function renderSudoPrompts() {
+  const box = $("#run-sudo");
+  const typed = Object.fromEntries($$("input", box).map((i) => [i.name, i.value]));
+  const ask = $$("#run-servers input:checked")
+    .map((i) => state.servers.find((s) => s.id === i.value))
+    .filter((s) => s?.sudo_mode === "ask");
+  box.replaceChildren(
+    el("div", { class: "muted" }, "Sudo passwords (used for this run only, never saved)"),
+    ...ask.map((s) => el("label", {},
+      el("span", {}, s.name),
+      el("input", { type: "password", name: s.id, autocomplete: "off", value: typed[s.id] ?? "" }))));
+  box.hidden = !ask.length;
+}
+$("#run-servers").addEventListener("change", renderSudoPrompts);
+
+function updateRunMode() {
+  $("#run-command-wrap").hidden = $("#run-script").value !== ADHOC;
+}
+$("#run-script").addEventListener("change", updateRunMode);
 
 function selectRunServer(id) {
   $$("#run-servers input").forEach((i) => (i.checked = i.value === id));
+  renderSudoPrompts();
 }
 
 $("#run-select-all").addEventListener("click", () => {
   const boxes = $$("#run-servers input");
   const all = boxes.every((b) => b.checked);
   boxes.forEach((b) => (b.checked = !all));
+  renderSudoPrompts();
 });
 
 $("#run-btn").addEventListener("click", () => {
   const scriptId = $("#run-script").value;
+  const command = scriptId === ADHOC ? $("#run-command").value : "";
   const serverIds = $$("#run-servers input:checked").map((i) => i.value);
-  if (!scriptId) return toast("Create a script first");
+  if (scriptId === ADHOC && !command.trim()) return toast("Type a command first");
   if (!serverIds.length) return toast("Select at least one server");
+  const sudoInputs = $$("#run-sudo input");
+  const sudoPasswords = Object.fromEntries(sudoInputs.filter((i) => i.value).map((i) => [i.name, i.value]));
+  sudoInputs.forEach((i) => (i.value = ""));
 
   const out = $("#run-output");
   out.replaceChildren();
@@ -370,10 +499,25 @@ $("#run-btn").addEventListener("click", () => {
   }
 
   const btn = $("#run-btn");
+  const stop = $("#stop-btn");
   btn.disabled = true;
+  stop.hidden = false;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/run`);
-  ws.onopen = () => ws.send(JSON.stringify({ script_id: scriptId, server_ids: serverIds, args: $("#run-args").value }));
+  ws.onopen = () => ws.send(JSON.stringify({
+    script_id: command ? null : scriptId, command, server_ids: serverIds, args: $("#run-args").value,
+    sudo_passwords: sudoPasswords,
+  }));
+  // Closing the socket drops the SSH sessions, which stops the remote scripts.
+  stop.onclick = () => {
+    ws.close();
+    for (const pane of Object.values(panes)) {
+      if (pane.badge.classList.contains("running")) {
+        pane.badge.className = "badge fail";
+        pane.badge.textContent = "stopped";
+      }
+    }
+  };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     const pane = panes[msg.server_id];
@@ -393,6 +537,7 @@ $("#run-btn").addEventListener("click", () => {
   };
   ws.onclose = (e) => {
     btn.disabled = false;
+    stop.hidden = true;
     if (e.code === 4401) showLogin();
   };
 });

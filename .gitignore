@@ -1,3 +1,18 @@
+# Environment
 .venv/
 __pycache__/
+
+# User data and secrets. The app keeps these in ~/.local/share/rackoon,
+# outside this folder; these patterns are a second line of defence in case
+# RACKOON_DATA_DIR points here or an export/cert gets saved into the project.
 data/
+*.db
+*.sqlite*
+config.json
+config.json.tmp
+rackoon-*.json
+server-manager-*.json
+*.pem
+*.key
+*.crt
+.env
